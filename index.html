@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Ultimate Car Simulator — Parking Prototype</title>
+<style>
+:root{color-scheme:dark;font-family:system-ui,-apple-system,Segoe UI,sans-serif}
+*{box-sizing:border-box}body{margin:0;background:#111827;color:#f8fafc;overflow:hidden;touch-action:none}
+#game{display:block;width:100vw;height:100dvh}
+.hud{position:fixed;top:12px;left:12px;right:12px;display:flex;gap:8px;align-items:flex-start;justify-content:space-between;pointer-events:none}
+.panel{background:#0b1220d9;border:1px solid #64748b66;border-radius:12px;padding:9px 12px;box-shadow:0 4px 18px #0005}
+.big{font-size:20px;font-weight:800;font-variant-numeric:tabular-nums}.small{font-size:12px;color:#cbd5e1}
+#message{position:fixed;top:94px;left:50%;transform:translateX(-50%);max-width:90vw;text-align:center;background:#0b1220e8;border:1px solid #64748b66;border-radius:12px;padding:10px 14px;font-weight:700;pointer-events:none}
+.controls{position:fixed;bottom:18px;left:0;right:0;display:flex;justify-content:space-between;align-items:end;padding:0 18px;gap:14px}
+.group{display:flex;gap:10px;align-items:end}
+.ctrl{width:66px;height:66px;border:1px solid #cbd5e188;border-radius:18px;background:#1e293be8;color:white;font-size:25px;font-weight:800;box-shadow:0 5px 0 #020617;touch-action:none;user-select:none}
+.ctrl:active,.ctrl.down{background:#2563eb;transform:translateY(3px);box-shadow:0 2px 0 #020617}
+.ctrl.gas{height:82px;background:#166534e8}.ctrl.brake{height:82px;background:#991b1be8}.ctrl.hand{font-size:13px;width:58px;height:50px}
+@media(min-width:800px){.ctrl{width:74px;height:74px}.controls{padding:0 30px;bottom:24px}}
+</style>
+</head>
+<body>
+<canvas id="game" aria-label="Car parking game"></canvas>
+<div class="hud">
+  <div class="panel"><div class="small">ULTIMATE CAR SIMULATOR</div><div class="big" id="speed">0 km/h</div><div class="small">WASD / arrows · Space handbrake</div></div>
+  <div class="panel"><div class="small">PARKING CHALLENGE</div><div class="big" id="status">Find the bay</div><div class="small" id="tries">Attempts: 0</div></div>
+</div>
+<div id="message">Drive into the green parking bay and stop gently.</div>
+<div class="controls">
+  <div class="group">
+    <button class="ctrl" data-key="left" aria-label="Steer left">◀</button>
+    <button class="ctrl" data-key="right" aria-label="Steer right">▶</button>
+  </div>
+  <div class="group">
+    <button class="ctrl hand" data-key="hand" aria-label="Handbrake">HANDBRAKE</button>
+    <button class="ctrl brake" data-key="brake" aria-label="Brake and reverse">▼</button>
+    <button class="ctrl gas" data-key="gas" aria-label="Accelerate">▲</button>
+  </div>
+</div>
+<script>
+(() => {
+  const canvas=document.getElementById('game'),ctx=canvas.getContext('2d');
+  const speedEl=document.getElementById('speed'),statusEl=document.getElementById('status'),triesEl=document.getElementById('tries'),messageEl=document.getElementById('message');
+  let W=0,H=0,dpr=1,tries=0,won=false,crashed=false,crashTimer=0;
+  const keys={left:false,right:false,gas:false,brake:false,hand:false};
+  const car={x:0,y:0,a:-Math.PI/2,v:0,w:25,h:43};
+  const bay={x:0,y:0,w:78,h:116};
+  const blocks=[];
+  function resize(){dpr=Math.min(window.devicePixelRatio||1,2);W=innerWidth;H=innerHeight;canvas.width=W*dpr;canvas.height=H*dpr;canvas.style.width=W+'px';canvas.style.height=H+'px';ctx.setTransform(dpr,0,0,dpr,0,0);setupWorld();}
+  function setupWorld(){
+    car.x=W*.5;car.y=H*.72;car.a=-Math.PI/2;car.v=0;won=false;crashed=false;crashTimer=0;
+    bay.x=W*.69;bay.y=H*.34;bay.w=Math.max(66,Math.min(88,W*.19));bay.h=Math.max(100,Math.min(130,H*.17));
+    blocks.length=0;
+    const bw=Math.max(42,Math.min(58,W*.12)),bh=bw*1.65;
+    for(let i=0;i<5;i++){let x=W*.18+i*(W*.16);let y=H*.23+(i%2)*H*.13;if(Math.abs(x-bay.x)<bw*1.2&&Math.abs(y-bay.y)<bh*1.4)continue;blocks.push({x,y,w:bw,h:bh,color:['#64748b','#475569','#94a3b8'][i%3]});}
+    messageEl.textContent='Drive into the green parking bay and stop gently.';
+  }
+  function worldToScreen(x,y){return [x,y];}
+  function roundedRect(x,y,w,h,r,fill,stroke){ctx.beginPath();ctx.roundRect(x,y,w,h,r);if(fill){ctx.fillStyle=fill;ctx.fill()}if(stroke){ctx.strokeStyle=stroke;ctx.stroke()}}
+  function drawCar(){
+    ctx.save();ctx.translate(car.x,car.y);ctx.rotate(car.a);
+    // shadow and body
+    roundedRect(-car.w/2+3,-car.h/2+5,car.w,car.h,7,'#0006');
+    roundedRect(-car.w/2,-car.h/2,car.w,car.h,7,'#dc2626','#fecaca');
+    roundedRect(-car.w*.37,-car.h*.23,car.w*.74,car.h*.3,4,'#93c5fd','#dbeafe');
+    roundedRect(-car.w*.36,car.h*.13,car.w*.72,car.h*.2,3,'#1e3a5f');
+    ctx.fillStyle='#fef3c7';ctx.fillRect(-car.w*.42,-car.h*.47,car.w*.24,4);ctx.fillRect(car.w*.18,-car.h*.47,car.w*.24,4);
+    ctx.fillStyle='#7f1d1d';ctx.fillRect(-car.w*.42,car.h*.4,car.w*.24,4);ctx.fillRect(car.w*.18,car.h*.4,car.w*.24,4);
+    ctx.fillStyle='#111827';ctx.fillRect(-car.w*.57,-car.h*.3,4,10);ctx.fillRect(car.w*.43,-car.h*.3,4,10);ctx.fillRect(-car.w*.57,car.h*.2,4,10);ctx.fillRect(car.w*.43,car.h*.2,4,10);
+    ctx.restore();
+  }
+  function drawBlock(b){
+    ctx.save();ctx.translate(b.x,b.y);
+    roundedRect(-b.w/2+3,-b.h/2+5,b.w,b.h,6,'#0005');
+    roundedRect(-b.w/2,-b.h/2,b.w,b.h,6,b.color,'#cbd5e1');
+    roundedRect(-b.w*.34,-b.h*.3,b.w*.68,b.h*.23,3,'#0f172a');
+    roundedRect(-b.w*.34,b.h*.08,b.w*.68,b.h*.23,3,'#0f172a');
+    ctx.restore();
+  }
+  function rectHit(px,py,b){return Math.abs(px-b.x)<(b.w+car.w)*.38&&Math.abs(py-b.y)<(b.h+car.h)*.38}
+  function update(dt){
+    if(crashed){crashTimer-=dt;if(crashTimer<=0){crashed=false;car.v=0;car.x=W*.5;car.y=H*.72;car.a=-Math.PI/2;}return}
+    if(won)return;
+    const accel=keys.gas?220:0,reverse=keys.brake?-170:0;
+    car.v+= (accel+reverse)*dt;
+    car.v*=Math.pow(keys.hand?.94:.985,dt*60);
+    car.v=Math.max(-105,Math.min(245,car.v));
+    if(!keys.gas&&!keys.brake)car.v*=Math.pow(.94,dt*60);
+    const steer=(keys.left?-1:0)+(keys.right?1:0);
+    const speedRatio=Math.min(1,Math.abs(car.v)/65);
+    car.a+=steer*2.25*speedRatio*dt*(car.v<0?-1:1);
+    car.x+=Math.cos(car.a)*car.v*dt;
+    car.y+=Math.sin(car.a)*car.v*dt;
+    const margin=car.w*.6;
+    if(car.x<margin||car.x>W-margin||car.y<H*.14||car.y>H-margin){hit('Careful! You hit the edge.');return}
+    for(const b of blocks)if(rectHit(car.x,car.y,b)){hit('Bump! Try the parking route again.');return}
+    const inBay=Math.abs(car.x-bay.x)<bay.w*.32&&Math.abs(car.y-bay.y)<bay.h*.32;
+    if(inBay&&Math.abs(car.v)<24){
+      won=true;car.v=0;statusEl.textContent='Parked!';messageEl.textContent='Perfect parking! Tap the screen to try again.';messageEl.style.borderColor='#4ade80';
+    }else if(inBay){messageEl.textContent='Good! Slow down to park inside the bay.'}
+    speedEl.textContent=Math.round(Math.abs(car.v)*.62)+' km/h';
+    statusEl.textContent=inBay?'Slow down…':'Find the bay';
+  }
+  function hit(msg){crashed=true;crashTimer=.65;tries++;triesEl.textContent='Attempts: '+tries;statusEl.textContent='Collision';messageEl.textContent=msg;messageEl.style.borderColor='#f87171';car.v=0}
+  function draw(){
+    ctx.clearRect(0,0,W,H);
+    ctx.fillStyle='#25313b';ctx.fillRect(0,0,W,H);
+    // asphalt parking area
+    ctx.fillStyle='#374151';ctx.fillRect(W*.08,H*.14,W*.84,H*.78);
+    // parking stripes
+    ctx.strokeStyle='#e5e7eb55';ctx.lineWidth=2;ctx.setLineDash([12,10]);
+    for(let i=0;i<7;i++){let x=W*.14+i*W*.12;ctx.beginPath();ctx.moveTo(x,H*.17);ctx.lineTo(x,H*.88);ctx.stroke()}
+    ctx.setLineDash([]);
+    // parking target
+    ctx.fillStyle='#16a34a33';ctx.fillRect(bay.x-bay.w/2,bay.y-bay.h/2,bay.w,bay.h);
+    ctx.strokeStyle='#4ade80';ctx.lineWidth=3;ctx.strokeRect(bay.x-bay.w/2,bay.y-bay.h/2,bay.w,bay.h);
+    ctx.fillStyle='#bbf7d0';ctx.font='bold 12px system-ui';ctx.textAlign='center';ctx.fillText('PARK HERE',bay.x,bay.y+4);
+    // lane and curb
+    ctx.strokeStyle='#fbbf24';ctx.lineWidth=4;ctx.beginPath();ctx.moveTo(W*.1,H*.65);ctx.lineTo(W*.9,H*.65);ctx.stroke();
+    blocks.forEach(drawBlock);drawCar();
+    if(crashed){ctx.fillStyle='#ef444455';ctx.fillRect(0,0,W,H)}
+  }
+  let last=0;
+  function frame(t){const dt=Math.min((t-last)/1000||0,.035);last=t;update(dt);draw();requestAnimationFrame(frame)}
+  function setKey(k,v,el){keys[k]=v;if(el)el.classList.toggle('down',v)}
+  document.querySelectorAll('[data-key]').forEach(el=>{
+    const k=el.dataset.key;
+    el.addEventListener('pointerdown',e=>{e.preventDefault();el.setPointerCapture(e.pointerId);setKey(k,true,el)});
+    const release=e=>{e.preventDefault();setKey(k,false,el)};
+    el.addEventListener('pointerup',release);el.addEventListener('pointercancel',release);el.addEventListener('lostpointercapture',release);
+  });
+  const map={ArrowLeft:'left',a:'left',ArrowRight:'right',d:'right',ArrowUp:'gas',w:'gas',ArrowDown:'brake',s:'brake',' ':'hand'};
+  window.addEventListener('keydown',e=>{const k=map[e.key]||map[e.key.toLowerCase()];if(k){e.preventDefault();keys[k]=true}if(won&&e.key==='Enter')setupWorld()});
+  window.addEventListener('keyup',e=>{const k=map[e.key]||map[e.key.toLowerCase()];if(k){e.preventDefault();keys[k]=false}});
+  canvas.addEventListener('pointerdown',()=>{if(won){setupWorld();messageEl.style.borderColor='#64748b66';statusEl.textContent='Find the bay';triesEl.textContent='Attempts: '+tries}});
+  window.addEventListener('resize',resize);
+  resize();requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
